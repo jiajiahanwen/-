@@ -77,6 +77,7 @@
         .btn-clear { background: #ea4335; }
         .btn-copy { background: #8ab4f8; color: #333; }
         .btn-edit { background: #4285f4; }
+        .btn-delete { background: #ff6b6b; color: white; }
         .btn-create { background: #26c6da; color: #333; }
         .records, .results {
             margin-top: 15px;
@@ -407,6 +408,22 @@
         editIndex = index;
     }
 
+    // 新增：删除单条支出记录
+    function deleteRecord(index) {
+        if (!confirm('确定删除这条支出记录吗？')) return;
+        
+        // 删除对应索引的记录
+        records.splice(index, 1);
+        // 同步到账本存储
+        updateLedger();
+        // 重新渲染记录列表
+        renderRecords();
+        // 重新计算转账结果
+        calculate();
+        
+        alert('支出记录已删除！');
+    }
+
     // 复制：直接新增一条相同记录
     function copyRecord(index) {
         const r = records[index];
@@ -475,6 +492,7 @@
                 <div class="record-btns">
                     <button class="btn-edit" onclick="editRecord(${i})">修改</button>
                     <button class="btn-copy" onclick="copyRecord(${i})">复制</button>
+                    <button class="btn-delete" onclick="deleteRecord(${i})">删除</button>
                 </div>
             </div>`;
         });
@@ -483,7 +501,10 @@
 
     // 计算
     function calculate() {
-        if (records.length === 0) { alert('请添加记录'); return; }
+        if (records.length === 0) { 
+            document.getElementById('resultList').innerHTML = '<div class="empty">请添加支出后计算</div>';
+            return; 
+        }
         const balance = {};
         records.forEach(r => {
             const per = r.amount / r.participants.length;
@@ -522,12 +543,13 @@
 
     function clearAll() {
         if (!currentLedgerId) return;
-        if (!confirm('确定清空？')) return;
+        if (!confirm('确定清空所有支出记录吗？')) return;
         records = [];
         editIndex = -1;
         updateLedger();
         renderRecords();
         document.getElementById('resultList').innerHTML = '<div class="empty">请添加支出后计算</div>';
+        alert('所有支出记录已清空！');
     }
 
     // ========== 留言板（无昵称、颜色区分、账本独立） ==========
