@@ -79,6 +79,7 @@
         .btn-edit { background: #4285f4; }
         .btn-delete { background: #ff6b6b; color: white; }
         .btn-create { background: #26c6da; color: #333; }
+        .btn-export { background: #9c27b0; color: white; } /* 导出PDF按钮样式 */
         .records, .results {
             margin-top: 15px;
             max-height: 300px;
@@ -165,6 +166,56 @@
             opacity: 0.5;
             pointer-events: none;
         }
+        /* PDF导出临时容器样式 */
+        #pdfContainer {
+            display: none;
+            width: 210mm;
+            padding: 20mm;
+            background: white;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .pdf-header {
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #1a73e8;
+            padding-bottom: 10px;
+        }
+        .pdf-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #1a73e8;
+            margin-bottom: 5px;
+        }
+        .pdf-info {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .pdf-section {
+            margin-bottom: 15px;
+        }
+        .pdf-section-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+            border-left: 4px solid #1a73e8;
+            padding-left: 8px;
+        }
+        .pdf-record-item {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed #eee;
+        }
+        .pdf-result-item {
+            margin-bottom: 5px;
+            color: #333;
+        }
+        .pdf-amount {
+            color: #ea4335;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -184,6 +235,7 @@
                 <div class="btn-group">
                     <button class="btn-create" onclick="createLedger()">创建新账本</button>
                     <button class="btn-edit" onclick="editLedgerInfo()">修改账本信息</button>
+                    <button class="btn-export" onclick="exportLedgerToPDF()">导出PDF</button> <!-- 新增导出按钮 -->
                 </div>
                 <select id="ledgerList" class="ledger-select" onchange="loadLedger()">
                     <option value="">选择已保存的账本</option>
@@ -241,6 +293,13 @@
             </div>
         </div>
     </div>
+
+    <!-- PDF导出临时容器 -->
+    <div id="pdfContainer"></div>
+
+    <!-- 引入PDF导出所需库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
 <script>
     let records = [];
@@ -408,7 +467,7 @@
         editIndex = index;
     }
 
-    // 新增：删除单条支出记录
+    // 删除单条支出记录
     function deleteRecord(index) {
         if (!confirm('确定删除这条支出记录吗？')) return;
         
@@ -590,6 +649,128 @@
         });
         box.innerHTML = html;
         box.scrollTop = box.scrollHeight;
+    }
+
+    // ========== 导出账本为PDF ==========
+    function exportLedgerToPDF() {
+        // 检查是否有选中的账本
+        if (!currentLedgerId) {
+            alert('请先创建或选择要导出的账本！');
+            return;
+        }
+
+        // 显示加载提示
+        alert('正在生成PDF，请稍候...');
+
+        // 获取PDF容器
+        const pdfContainer = document.getElementById('pdfContainer');
+        // 构建PDF内容
+        buildPDFContent(pdfContainer);
+        
+        // 显示PDF容器（用于渲染）
+        pdfContainer.style.display = 'block';
+
+        // 使用html2canvas将DOM转换为画布
+        html2canvas(pdfContainer, {
+            scale: 2, // 提高分辨率
+            useCORS: true,
+            logging: false
+        }).then(canvas => {
+            // 隐藏PDF容器
+            pdfContainer.style.display = 'none';
+
+            // 创建PDF文档
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            // 获取画布数据
+            const imgData = canvas.toDataURL('image/png');
+            const imgWidth = 210;
+            const imgHeight = canvas.height * imgWidth / canvas.width;
+
+            // 添加图片到PDF
+            pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+            
+            // 保存PDF文件
+            const fileName = `${currentLedgerName}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
+            pdf.save(fileName);
+
+            // 提示导出成功
+            alert(`PDF导出成功！文件名为：${fileName}`);
+        }).catch(error => {
+            // 隐藏PDF容器
+            pdfContainer.style.display = 'none';
+            console.error('PDF导出失败：', error);
+            alert('PDF导出失败，请重试！');
+        });
+    }
+
+    // 构建PDF导出内容
+    function buildPDFContent(container) {
+        // 获取账本总金额
+        const totalAmount = records.reduce((sum, record) => sum + record.amount, 0).toFixed(2);
+        
+        // 构建头部信息
+        let html = `
+        <div class="pdf-header">
+            <div class="pdf-title">${currentLedgerName}</div>
+            <div class="pdf-info">账本日期：${currentLedgerDate}</div>
+            <div class="pdf-info">导出时间：${new Date().toLocaleString()}</div>
+            <div class="pdf-info">总支出金额：¥${totalAmount}</div>
+        </div>
+        `;
+
+        // 支出记录部分
+        html += `<div class="pdf-section">
+            <div class="pdf-section-title">支出记录</div>
+            ${records.length === 0 ? 
+                '<div class="empty">暂无支出记录</div>' : 
+                records.map((r, i) => `
+                    <div class="pdf-record-item">
+                        <strong>${i+1}. ${r.item}</strong> - <span class="pdf-amount">¥${r.amount.toFixed(2)}</span>
+                        <div>付款人：${r.payer}</div>
+                        <div>分摊人：${r.participants.join(' ')}</div>
+                    </div>
+                `).join('')
+            }
+        </div>`;
+
+        // 转账结果部分
+        const resultList = document.getElementById('resultList');
+        const resultHtml = resultList.innerHTML;
+        html += `<div class="pdf-section">
+            <div class="pdf-section-title">转账结果</div>
+            ${records.length === 0 ? 
+                '<div class="empty">暂无转账记录</div>' : 
+                resultHtml.includes('收支平衡') ? 
+                    '<div class="empty">收支平衡，无需转账</div>' :
+                    Array.from(resultList.children).map((item, i) => {
+                        const text = item.textContent.trim();
+                        return `<div class="pdf-result-item">${text}</div>`;
+                    }).join('')
+            }
+        </div>`;
+
+        // 留言板部分（可选）
+        html += `<div class="pdf-section">
+            <div class="pdf-section-title">留言板</div>
+            ${messages.length === 0 ? 
+                '<div class="empty">暂无留言</div>' : 
+                messages.map(msg => `
+                    <div class="pdf-record-item">
+                        <div><strong>${msg.name}</strong>（${msg.time}）</div>
+                        <div>${msg.content}</div>
+                    </div>
+                `).join('')
+            }
+        </div>`;
+
+        // 设置容器内容
+        container.innerHTML = html;
     }
 </script>
 </body>
