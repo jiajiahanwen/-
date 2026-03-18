@@ -193,28 +193,38 @@
             margin-bottom: 5px;
         }
         .pdf-section {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
         .pdf-section-title {
             font-size: 16px;
             font-weight: bold;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
             color: #333;
             border-left: 4px solid #1a73e8;
             padding-left: 8px;
         }
         .pdf-record-item {
-            margin-bottom: 8px;
-            padding-bottom: 8px;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
             border-bottom: 1px dashed #eee;
         }
+        .pdf-record-item:last-child {
+            border-bottom: none;
+        }
         .pdf-result-item {
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             color: #333;
+            font-size: 13px;
         }
         .pdf-amount {
             color: #ea4335;
             font-weight: bold;
+        }
+        .pdf-total {
+            font-size: 14px;
+            font-weight: bold;
+            margin-top: 10px;
+            color: #1a73e8;
         }
     </style>
 </head>
@@ -651,13 +661,16 @@
         box.scrollTop = box.scrollHeight;
     }
 
-    // ========== 导出账本为PDF ==========
+    // ========== 导出账本为PDF（优化版） ==========
     function exportLedgerToPDF() {
         // 检查是否有选中的账本
         if (!currentLedgerId) {
             alert('请先创建或选择要导出的账本！');
             return;
         }
+
+        // 先确保转账结果已计算
+        calculate();
 
         // 显示加载提示
         alert('正在生成PDF，请稍候...');
@@ -670,11 +683,13 @@
         // 显示PDF容器（用于渲染）
         pdfContainer.style.display = 'block';
 
-        // 使用html2canvas将DOM转换为画布
+        // 使用html2canvas将DOM转换为画布（优化配置）
         html2canvas(pdfContainer, {
-            scale: 2, // 提高分辨率
+            scale: 3, // 更高分辨率，保证PDF清晰
             useCORS: true,
-            logging: false
+            logging: false,
+            letterRendering: true, // 优化文字渲染
+            allowTaint: true
         }).then(canvas => {
             // 隐藏PDF容器
             pdfContainer.style.display = 'none';
@@ -688,19 +703,31 @@
             });
 
             // 获取画布数据
-            const imgData = canvas.toDataURL('image/png');
+            const imgData = canvas.toDataURL('image/png', 1.0); // 无损质量
             const imgWidth = 210;
             const imgHeight = canvas.height * imgWidth / canvas.width;
 
-            // 添加图片到PDF
-            pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+            // 处理长内容分页（如果内容超过一页）
+            let heightLeft = imgHeight;
+            let position = 0;
+
+            pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+            heightLeft -= 297; // A4高度297mm
+
+            // 如果内容超出一页，添加新页面
+            while (heightLeft >= 0) {
+                position = heightLeft - imgHeight;
+                pdf.addPage();
+                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                heightLeft -= 297;
+            }
             
             // 保存PDF文件
             const fileName = `${currentLedgerName}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
             pdf.save(fileName);
 
             // 提示导出成功
-            alert(`PDF导出成功！文件名为：${fileName}`);
+            alert(`PDF导出成功！文件名为：${fileName}\n包含完整的支出记录和转账结果`);
         }).catch(error => {
             // 隐藏PDF容器
             pdfContainer.style.display = 'none';
@@ -709,12 +736,12 @@
         });
     }
 
-    // 构建PDF导出内容
+    // 构建PDF导出内容（确保完整包含支出记录和转账结果）
     function buildPDFContent(container) {
-        // 获取账本总金额
+        // 计算总支出
         const totalAmount = records.reduce((sum, record) => sum + record.amount, 0).toFixed(2);
         
-        // 构建头部信息
+        // ===== 构建头部信息 =====
         let html = `
         <div class="pdf-header">
             <div class="pdf-title">${currentLedgerName}</div>
@@ -724,40 +751,84 @@
         </div>
         `;
 
-        // 支出记录部分
+        // ===== 支出记录部分（完整展示所有记录）=====
         html += `<div class="pdf-section">
-            <div class="pdf-section-title">支出记录</div>
+            <div class="pdf-section-title">一、支出记录（共${records.length}条）</div>
             ${records.length === 0 ? 
                 '<div class="empty">暂无支出记录</div>' : 
                 records.map((r, i) => `
                     <div class="pdf-record-item">
-                        <strong>${i+1}. ${r.item}</strong> - <span class="pdf-amount">¥${r.amount.toFixed(2)}</span>
-                        <div>付款人：${r.payer}</div>
-                        <div>分摊人：${r.participants.join(' ')}</div>
+                        <div><strong>${i+1}. 支出项目：</strong>${r.item}</div>
+                        <div><strong>金额：</strong><span class="pdf-amount">¥${r.amount.toFixed(2)}</span></div>
+                        <div><strong>付款人：</strong>${r.payer}</div>
+                        <div><strong>分摊人：</strong>${r.participants.join('、')}</div>
+                        <div><strong>人均分摊：</strong>¥${(r.amount / r.participants.length).toFixed(2)}</div>
                     </div>
                 `).join('')
             }
+            ${records.length > 0 ? `<div class="pdf-total">支出总计：¥${totalAmount}</div>` : ''}
         </div>`;
 
-        // 转账结果部分
-        const resultList = document.getElementById('resultList');
-        const resultHtml = resultList.innerHTML;
+        // ===== 转账结果部分（精准提取，保证完整）=====
         html += `<div class="pdf-section">
-            <div class="pdf-section-title">转账结果</div>
-            ${records.length === 0 ? 
-                '<div class="empty">暂无转账记录</div>' : 
-                resultHtml.includes('收支平衡') ? 
-                    '<div class="empty">收支平衡，无需转账</div>' :
-                    Array.from(resultList.children).map((item, i) => {
-                        const text = item.textContent.trim();
-                        return `<div class="pdf-result-item">${text}</div>`;
-                    }).join('')
-            }
+            <div class="pdf-section-title">二、转账结果</div>
+            ${(() => {
+                // 重新计算转账结果，避免DOM读取错误
+                if (records.length === 0) {
+                    return '<div class="empty">暂无支出记录，无法计算转账结果</div>';
+                }
+                
+                // 重新计算转账逻辑，确保数据准确
+                const balance = {};
+                records.forEach(r => {
+                    const per = r.amount / r.participants.length;
+                    balance[r.payer] = (balance[r.payer] || 0) + r.amount - per;
+                    r.participants.forEach(p => {
+                        if (p !== r.payer) balance[p] = (balance[p] || 0) - per;
+                    });
+                });
+                
+                const creditors = [], debtors = [];
+                Object.entries(balance).forEach(([p, v]) => {
+                    const val = Math.round(v * 100) / 100;
+                    if (val > 0.01) creditors.push({ person: p, amount: val });
+                    else if (val < -0.01) debtors.push({ person: p, amount: -val });
+                });
+                
+                const transfers = [];
+                let c = 0, d = 0;
+                while (c < creditors.length && d < debtors.length) {
+                    const cv = creditors[c], dv = debtors[d];
+                    const t = Math.min(cv.amount, dv.amount);
+                    transfers.push({ from: dv.person, to: cv.person, amount: t });
+                    cv.amount -= t; 
+                    dv.amount -= t;
+                    if (cv.amount < 0.01) c++;
+                    if (dv.amount < 0.01) d++;
+                }
+                
+                if (transfers.length === 0) {
+                    return '<div class="empty">收支平衡，无需转账</div>';
+                }
+                
+                // 构建完整的转账结果
+                let transferHtml = '';
+                transfers.forEach((t, i) => {
+                    transferHtml += `
+                    <div class="pdf-result-item">
+                        ${i+1}. <strong>${t.from}</strong> 需向 <strong>${t.to}</strong> 转账：
+                        <span class="pdf-amount">¥${t.amount.toFixed(2)}</span>
+                    </div>
+                    `;
+                });
+                
+                return transferHtml;
+            })()}
         </div>`;
 
-        // 留言板部分（可选）
+        // ===== 可选：留言板部分（可根据需要保留/删除）=====
         html += `<div class="pdf-section">
-            <div class="pdf-section-title">留言板</div>
+            <div class="pdf-section-title">三、留言板</div>
             ${messages.length === 0 ? 
                 '<div class="empty">暂无留言</div>' : 
                 messages.map(msg => `
